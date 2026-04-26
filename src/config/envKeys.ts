@@ -16,4 +16,6 @@ if (
     envKeys.EXPRESS_PORT = Number(process.env.EXPRESS_PORT);
 }
 
+console.log("envKeys", envKeys);
+
 export default envKeys;

@@ -44,6 +44,7 @@ The app listens on port **2001** unless you set `EXPRESS_PORT`.
 - `serverCommon.ts` — wires up Express, `/api`, and static files.
 - `config/envKeys.ts` — reads the settings above.
 - `routes/routesAll.ts` — attaches the API routes.
+- `routes/shellEngine/shellEngineAbout.route.ts` — small JSON “about” endpoint.
 - `routes/shellEngine/shellEngineFile.route.ts` — file upload and download.
 - `routes/shellEngine/shellEngineShell.route.ts` — run shell commands.
 - `middleware/middlewareVerifyToken.ts` — checks the `X-API-Token` header.
@@ -53,6 +54,43 @@ The app listens on port **2001** unless you set `EXPRESS_PORT`.
 ### Open to anyone
 
 - **GET** `/api/` — simple welcome text. No token.
+
+### About (app name)
+
+These URLs only return JSON; they do not read or write your file storage.
+
+- **GET** `/api/shell-engine/about` — public. Tells you the app name.
+
+  ```json
+  { "app": "ai-notes-xyz-shell" }
+  ```
+
+  Example:
+
+  ```bash
+  curl -s http://localhost:2001/api/shell-engine/about
+  ```
+
+- **GET** `/api/shell-engine/about/private` — needs a valid **`X-API-Token`** header (same value as `API_TOKEN` in `.env`).
+
+  - Missing or wrong token → **401** (`{"message":"Invalid or missing API token"}` from the verifier).
+  - `API_TOKEN` unset on the server → **503** (`{"message":"API_TOKEN is not configured"}`).
+
+  On **200**, the body always includes **`validateToken: true`**. That flag means the server accepted your token for this request (same middleware as file upload and shell execute).
+
+  ```json
+  { "app": "ai-notes-xyz-shell", "validateToken": true }
+  ```
+
+  Examples (port **2001**):
+
+  ```bash
+  # Valid token — 200 + JSON above
+  curl -s -H "X-API-Token: YOUR_TOKEN_HERE" http://localhost:2001/api/shell-engine/about/private
+
+  # No header — 401
+  curl -s -o /dev/null -w "%{http_code}\n" http://localhost:2001/api/shell-engine/about/private
+  ```
 
 ### Needs the token (`X-API-Token: <your API_TOKEN>`)
 

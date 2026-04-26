@@ -1,6 +1,6 @@
 services:
   ai-notes-xyz-shell:
-    image: ai-notes-xyz-shell
+    build: .
     ports:
       # host:container — must match EXPRESS_PORT inside the container
       - "2001:2000"
