@@ -8,6 +8,9 @@ import envKeys from '../../config/envKeys';
 import middlewareShellEngineKey from '../../middleware/middlewareVerifyToken';
 
 const MAX_LOCAL_FILE_BYTES = 50 * 1024 * 1024;
+const LIST_MAX_FILES_CAP = 500;
+const LIST_DEFAULT_MAX_FILES = 300;
+const LIST_DEFAULT_MAX_DEPTH = 24;
 
 const REQUIRED_FILE_PATH_SEGMENT = 'ai-notes-xyz-shell-files';
 
@@ -99,6 +102,107 @@ router.post('/write', middlewareShellEngineKey, async (req: Request, res: Respon
         });
     } catch (error) {
         console.error(error);
+        return res.status(500).json({ message: 'Server error' });
+    }
+});
+
+async function walkFilesRecursive(params: {
+    relBase: string;
+    absBase: string;
+    maxFiles: number;
+    maxDepth: number;
+    depth: number;
+    out: { relativePath: string; size: number; mtimeMs: number }[];
+}): Promise<void> {
+    const { relBase, absBase, maxFiles, maxDepth, depth, out } = params;
+    if (out.length >= maxFiles || depth > maxDepth) {
+        return;
+    }
+    try {
+        const entries = await fs.readdir(absBase, { withFileTypes: true });
+        for (const ent of entries) {
+            if (out.length >= maxFiles) {
+                return;
+            }
+            const name = typeof ent.name === 'string' ? ent.name : String(ent.name);
+            const rel = `${relBase}/${name}`.replace(/\\/g, '/');
+            const abs = path.join(absBase, name);
+            if (ent.isSymbolicLink()) {
+                continue;
+            }
+            if (ent.isDirectory()) {
+                await walkFilesRecursive({
+                    relBase: rel,
+                    absBase: abs,
+                    maxFiles,
+                    maxDepth,
+                    depth: depth + 1,
+                    out,
+                });
+            } else if (ent.isFile()) {
+                const st = await fs.stat(abs);
+                out.push({
+                    relativePath: rel,
+                    size: st.size,
+                    mtimeMs: st.mtimeMs,
+                });
+            }
+        }
+    } catch (e: unknown) {
+        if (e && typeof e === 'object' && 'code' in e && (e as NodeJS.ErrnoException).code === 'ENOENT') {
+            return;
+        }
+        throw e;
+    }
+}
+
+router.get('/list', middlewareShellEngineKey, async (req: Request, res: Response) => {
+    try {
+        const rawDir =
+            typeof req.query.relativeDir === 'string' && req.query.relativeDir.trim() !== ''
+                ? req.query.relativeDir
+                : REQUIRED_FILE_PATH_SEGMENT;
+        const rel = sanitizeRelativePath(rawDir);
+        if (!rel.ok) {
+            return res.status(400).json({ message: rel.message });
+        }
+        const segmentOk = fileRelativePathMustIncludeShellSegment(rel.value);
+        if (!segmentOk.ok) {
+            return res.status(400).json({ message: segmentOk.message });
+        }
+        const resolved = resolveUnderSandbox(rel.value);
+        if (!resolved.ok) {
+            return res.status(400).json({ message: resolved.message });
+        }
+
+        let maxFiles = LIST_DEFAULT_MAX_FILES;
+        if (req.query.maxFiles !== undefined) {
+            const n = Number(req.query.maxFiles);
+            if (Number.isFinite(n) && n >= 1) {
+                maxFiles = Math.min(LIST_MAX_FILES_CAP, Math.floor(n));
+            }
+        }
+        let maxDepth = LIST_DEFAULT_MAX_DEPTH;
+        if (req.query.maxDepth !== undefined) {
+            const n = Number(req.query.maxDepth);
+            if (Number.isFinite(n) && n >= 0) {
+                maxDepth = Math.min(64, Math.floor(n));
+            }
+        }
+
+        const relNorm = rel.value.split(/[/\\]/).join('/');
+        const out: { relativePath: string; size: number; mtimeMs: number }[] = [];
+        await walkFilesRecursive({
+            relBase: relNorm.replace(/\/+$/, '') || relNorm,
+            absBase: resolved.abs,
+            maxFiles,
+            maxDepth,
+            depth: 0,
+            out,
+        });
+        return res.json({ files: out });
+    } catch (err: unknown) {
+        console.error(err);
         return res.status(500).json({ message: 'Server error' });
     }
 });

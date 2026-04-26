@@ -8,7 +8,8 @@ import envKeys from '../../config/envKeys';
 import middlewareShellEngineKey from '../../middleware/middlewareVerifyToken';
 
 const DEFAULT_SHELL_TIMEOUT_MS = 30_000;
-const MAX_SHELL_TIMEOUT_MS = 120_000;
+/** Long installs (apt, npm) need headroom; keep in sync with API shellExecuteTimeoutMs caps. */
+const MAX_SHELL_TIMEOUT_MS = 240_000;
 
 const REQUIRED_FILE_PATH_SEGMENT = 'ai-notes-xyz-shell-files';
 
@@ -62,10 +63,10 @@ router.post('/execute', middlewareShellEngineKey, async (req: Request, res: Resp
         let timeoutMs = DEFAULT_SHELL_TIMEOUT_MS;
         if (req.body?.timeoutMs !== undefined) {
             const n = Number(req.body.timeoutMs);
-            if (!Number.isFinite(n) || n < 1 || n > MAX_SHELL_TIMEOUT_MS) {
-                return res.status(400).json({ message: `timeoutMs must be between 1 and ${MAX_SHELL_TIMEOUT_MS}` });
+            if (!Number.isFinite(n) || n < 1) {
+                return res.status(400).json({ message: 'timeoutMs must be a finite number >= 1' });
             }
-            timeoutMs = Math.floor(n);
+            timeoutMs = Math.min(Math.floor(n), MAX_SHELL_TIMEOUT_MS);
         }
 
         let cwd = defaultShellWorkingDirectory();
@@ -85,6 +86,7 @@ router.post('/execute', middlewareShellEngineKey, async (req: Request, res: Resp
         }
 
         await fs.mkdir(defaultShellWorkingDirectory(), { recursive: true });
+        await fs.mkdir(cwd, { recursive: true });
 
         try {
             const { stdout, stderr } = await execAsync(command, {

@@ -108,7 +108,9 @@ These URLs only return JSON; they do not read or write your file storage.
 - **POST** `/api/shell-engine/run-shell/execute` — send JSON:
   - `command` — required, the command string.
   - `cwd` — optional, folder (relative path under storage) to run the command in.
-  - `timeoutMs` — optional, how long to wait in milliseconds (1 to 120000). Default **30000**.
+  - `timeoutMs` — optional, how long to wait in milliseconds (must be ≥ 1; values above **240000** are clamped to that cap). Default **30000**.
+
+When you use the published **Docker** image, the process runs on **Ubuntu 24.04** with **Node.js 24**, **Python 3**, **npm**, **pip**, **apt-get**, **git**, **openssl**, **Chromium**, **ffmpeg**, and other packages from the Dockerfile — suitable for installing extra libraries at runtime when the host has network access.
 
 ### Path rules (simple version)
 
