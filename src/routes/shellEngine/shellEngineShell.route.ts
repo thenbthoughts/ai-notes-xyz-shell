@@ -28,6 +28,15 @@ router.post('/execute', middlewareShellEngineKey, async (req: Request, res: Resp
         try {
             const { stdout, stderr } = await execAsync(command, { timeout: effectiveTimeoutMs });
 
+            if (stderr!=='') {
+                return res.status(400).json({
+                    message: 'Command execution failed',
+                    error: 'Command execution failed',
+                    stdout,
+                    stderr,
+                });
+            }
+
             return res.status(200).json({
                 message: 'Command executed successfully',
                 stdout,

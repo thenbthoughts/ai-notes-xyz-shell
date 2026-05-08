@@ -1,0 +1,84 @@
+# App shell (Express on 2000) + OpenCode server (4096), single image.
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
+    bash \
+    wget \
+    vim \
+    git \
+    gnupg \
+    xvfb \
+    python3-pip \
+    python3-dev \
+    python3-venv \
+    ca-certificates \
+    fonts-liberation \
+    libnss3 \
+    libatk-bridge2.0-0 \
+    libx11-xcb1 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    libgbm1 \
+    libasound2t64 \
+    sqlite3 \
+    ffmpeg \
+    unzip \
+    zip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Google Chrome from the official repo, then provide chromium aliases
+# so existing commands that call `chromium` or `chromium-browser` keep working.
+RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub \
+    | gpg --dearmor -o /usr/share/keyrings/googlechrome-linux-keyring.gpg \
+    && echo "deb [arch=amd64 signed-by=/usr/share/keyrings/googlechrome-linux-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
+    > /etc/apt/sources.list.d/google-chrome.list \
+    && apt-get update && apt-get install -y google-chrome-stable \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/google-chrome-stable /usr/local/bin/chromium \
+    && ln -sf /usr/bin/google-chrome-stable /usr/local/bin/chromium-browser
+
+RUN curl -fsSL https://deb.nodesource.com/setup_24.x | bash - \
+    && apt-get update && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Puppeteer globally and use system Chrome (skip bundled browser download).
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+RUN npm install -g puppeteer
+
+RUN curl -fsSL https://opencode.ai/install | bash
+
+ENV PATH="/root/.opencode/bin:$PATH"
+ENV OPENCODE_SERVER_PASSWORD="password"
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm i
+
+COPY tsconfig.json ./
+COPY src ./src
+RUN npm run build && npm prune --omit=dev
+
+RUN mkdir -p data/ai-notes-xyz-shell-files dist
+
+COPY docker-entrypoint-combined.sh /docker-entrypoint-combined.sh
+RUN sed -i 's/\r$//' /docker-entrypoint-combined.sh && chmod +x /docker-entrypoint-combined.sh
+
+ENV NODE_ENV=production
+ENV EXPRESS_PORT=2000
+
+EXPOSE 2000 4096
+
+ENTRYPOINT ["/docker-entrypoint-combined.sh"]
+CMD ["npm", "start"]
+
+# build the image
+# docker build -f Dockerfile.combined -t ai-notes-xyz-opencode-shell-combined .
+
+# run the image
+# docker run -d -p 2002:2000 -p 4096:4096 ai-notes-xyz-opencode-shell-combined
