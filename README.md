@@ -2,8 +2,8 @@
 
 A small Node web app (Express + TypeScript) that lets trusted clients:
 
-- upload and download files in a fixed folder on the server, and  
-- run shell commands in that same area.
+- upload, download, and list files in a fixed folder on the server, and  
+- run shell commands on the server.
 
 Access is protected with a secret token. By default, files go under a `data` folder next to where you start the app. You can change that folder with an environment variable. The app can also serve static files from `dist/` if you add them.
 
@@ -40,20 +40,20 @@ The app listens on port **2001** unless you set `EXPRESS_PORT`.
 
 ## Project files (short map)
 
-- `index.ts` — starts the server.
-- `serverCommon.ts` — wires up Express, `/api`, and static files.
-- `config/envKeys.ts` — reads the settings above.
-- `routes/routesAll.ts` — attaches the API routes.
-- `routes/shellEngine/shellEngineAbout.route.ts` — small JSON “about” endpoint.
-- `routes/shellEngine/shellEngineFile.route.ts` — file upload and download.
-- `routes/shellEngine/shellEngineShell.route.ts` — run shell commands.
-- `middleware/middlewareVerifyToken.ts` — checks the `X-API-Token` header.
+- `src/index.ts` — starts the server.
+- `src/serverCommon.ts` — wires up Express, `/api`, and static files.
+- `src/config/envKeys.ts` — reads the settings above.
+- `src/routes/routesAll.ts` — attaches the API routes.
+- `src/routes/shellEngine/shellEngineAbout.route.ts` — small JSON “about” endpoint.
+- `src/routes/shellEngine/shellEngineFile.route.ts` — file upload, download, and recursive listing.
+- `src/routes/shellEngine/shellEngineShell.route.ts` — run shell commands.
+- `src/middleware/middlewareVerifyToken.ts` — checks the `X-API-Token` header.
 
 ## API (all under `/api`)
 
 ### Open to anyone
 
-- **GET** `/api/` — simple welcome text. No token.
+- **GET** `/api/` — welcome text: `Welcome to ai notes shell engine.` No token.
 
 ### About (app name)
 
@@ -101,29 +101,36 @@ These URLs only return JSON; they do not read or write your file storage.
   - `file` — the file (one file only),
   - `relativePath` — where to save it, as a path **under** your storage folder (see rules below).
   - Max size **50MB** per upload.
+  - On success the server returns **201** with JSON (see example below).
+- **GET** `/api/shell-engine/file/list` — list files recursively under a directory. Query parameters:
+  - `relativeDir` — optional; directory **under** storage (same path rules as read/write). If omitted, defaults to **`ai-notes-xyz-shell-files`**.
+  - `maxFiles` — optional; default **300**, capped at **500**.
+  - `maxDepth` — optional; default **24**, capped at **64** (recursion depth from `relativeDir`; `0` means only that directory).
+  - Response **200:** `{ "files": [ { "relativePath", "size", "mtimeMs" } ] }`. Symbolic links are skipped; the walk stops when the caps are reached.
+
+  Example:
+
+  ```bash
+  curl -s -H "X-API-Token: YOUR_TOKEN_HERE" "http://localhost:2001/api/shell-engine/file/list?relativeDir=ai-notes-xyz-shell-files&maxFiles=50&maxDepth=5"
+  ```
+
 - **GET** `/api/shell-engine/file/read?relativePath=...` — download a file. Same path rules as write.
 
-**Run a command** (no shell: `spawn(cmd, args, { shell: false })`)
+**Run a command** (Node `child_process.exec`)
+
+The server runs your string through a shell, so pipes, redirects, and other shell features apply. Commands are **not** limited to `FILE_STORAGE_PATH`; they run with the server process user and environment.
 
 - **POST** `/api/shell-engine/run-shell/execute` — send JSON:
-  - `cmd` — required, any executable name or path resolvable from `cwd` / `PATH` (no allowlist). Legacy `command` string is **not** accepted.
-  - `args` — required, array of string arguments (may be empty `[]`). Operators like `&` in URLs are safe because no shell parses this string.
-  - `cwd` — optional, folder (relative path under storage) to run the command in.
-  - `timeoutMs` — optional, how long to wait in milliseconds (must be ≥ 1; values above **240000** are clamped to that cap). Default **30000**.
+  - `command` — required, non-empty string (the full command line).
+  - `timeoutMs` — optional; wait time in milliseconds. If omitted, default **15000**. If provided, must be ≥ **1**; values above **120000** are clamped to that cap.
+  - **200** — `{ "message": "Command executed successfully", "stdout", "stderr" }`.
+  - **400** — invalid `command`, or the command failed (non-zero exit, signal, timeout, etc.). Validation errors use `{ "message": "..." }`; execution errors add `"error"`, `"stdout"`, and `"stderr"`.
 
 Example body:
 
 ```json
 {
-  "cmd": "chromium",
-  "args": [
-    "--headless=new",
-    "--disable-gpu",
-    "--no-sandbox",
-    "--screenshot=out.png",
-    "https://ai-notes.xyz?a=1&b=2"
-  ],
-  "cwd": "ai-notes-xyz-shell-files/your-thread",
+  "command": "chromium --headless=new --disable-gpu --no-sandbox --screenshot=out.png 'https://ai-notes.xyz?a=1&b=2'",
   "timeoutMs": 60000
 }
 ```
@@ -134,11 +141,9 @@ When you use the published **Docker** image, the process runs on **Ubuntu 24.04*
 
 All file paths are **under** `FILE_STORAGE_PATH` (or the default `data` folder). You cannot use absolute paths or `..` to jump outside that area.
 
-For upload and download, the path must contain the folder name **`ai-notes-xyz-shell-files`** so files stay in that subfolder.
+For upload, download, and listing, the path must contain the folder name **`ai-notes-xyz-shell-files`** so files stay in that subfolder.
 
-If you do not pass `cwd` for a shell command, the command runs in `ai-notes-xyz-shell-files` inside your storage folder (the app creates it if needed).
-
-### Example: successful file write (JSON response)
+### Example: successful file write (JSON response, HTTP **201**)
 
 ```json
 {
@@ -149,21 +154,38 @@ If you do not pass `cwd` for a shell command, the command runs in `ai-notes-xyz-
 }
 ```
 
-### Example: shell command response (JSON)
+### Example: shell command responses (JSON)
 
-You usually get **200** with a body like this (even when the command itself fails; check `exitCode`):
+On success (**200**):
 
 ```json
 {
-  "message": "OK",
-  "exitCode": 0,
+  "message": "Command executed successfully",
   "stdout": "",
-  "stderr": "",
-  "timedOut": false
+  "stderr": ""
 }
 ```
 
-If the command hits the time limit, `timedOut` is `true` and `message` may say the command timed out.
+If the command string is missing or empty, you get **400** with `{ "message": "A non-empty command string is required" }`.
+
+If the command runs but fails (non-zero exit, signal, timeout, etc.), you get **400** with a body like:
+
+```json
+{
+  "message": "Command execution failed",
+  "error": "Command failed: ...",
+  "stdout": "",
+  "stderr": ""
+}
+```
+
+Example:
+
+```bash
+curl -s -X POST -H "Content-Type: application/json" -H "X-API-Token: YOUR_TOKEN_HERE" \
+  -d '{"command":"echo hello","timeoutMs":5000}' \
+  http://localhost:2001/api/shell-engine/run-shell/execute
+```
 
 ### Other URLs
 
