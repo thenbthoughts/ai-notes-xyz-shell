@@ -57,6 +57,7 @@ ENV OPENCODE_SERVER_PASSWORD="password"
 
 WORKDIR /app
 
+# repo: start - https://github.com/thenbthoughts/ai-notes-xyz-shell.git
 COPY package.json package-lock.json ./
 RUN npm i
 
@@ -71,6 +72,7 @@ RUN sed -i 's/\r$//' /docker-entrypoint-combined.sh && chmod +x /docker-entrypoi
 
 ENV NODE_ENV=production
 ENV EXPRESS_PORT=2000
+# repo: end
 
 EXPOSE 2000 4096
 
