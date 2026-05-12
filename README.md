@@ -1,4 +1,4 @@
-# ai-notes-xyz-shell
+# ai-notes-xyz-opencode-custom-utils
 
 A small Node web app (Express + TypeScript) that lets trusted clients:
 
